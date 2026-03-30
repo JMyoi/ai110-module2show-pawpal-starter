@@ -80,14 +80,22 @@ else:
         priority = st.selectbox("Priority", ["HIGH", "MEDIUM", "LOW"])
     category = st.selectbox("Category", [c.value for c in TaskCategory])
 
+    col_time1, col_time2 = st.columns([1, 2])
+    with col_time1:
+        use_preferred_time = st.checkbox("Set preferred time?")
+    with col_time2:
+        preferred_time_val = st.time_input("Preferred time", value=time(9, 0), disabled=not use_preferred_time)
+
     if st.button("Add Task"):
         if task_title:
-            st.session_state.pets[task_pet]["tasks"].append({
+            task_data = {
                 "title": task_title,
                 "duration_minutes": int(duration),
                 "priority": priority,
                 "category": category,
-            })
+                "preferred_time": preferred_time_val.strftime("%H:%M") if use_preferred_time else None,
+            }
+            st.session_state.pets[task_pet]["tasks"].append(task_data)
             st.rerun()
 
     # Filter controls
@@ -123,6 +131,7 @@ else:
                     "duration (min)": t["duration_minutes"],
                     "priority": t["priority"],
                     "category": t["category"],
+                    "preferred time": t.get("preferred_time") or "—",
                     "status": "Done" if t.get("is_completed") else "Pending",
                 }
                 for t in filtered
@@ -148,11 +157,13 @@ if st.button("Generate Schedule", type="primary"):
     for pname, pdata in st.session_state.pets.items():
         pet = Pet(name=pname, species=pdata["species"], age=pdata["age"])
         for t in pdata["tasks"]:
+            pt = t.get("preferred_time")
             task = Task(
                 title=t["title"],
                 duration_minutes=t["duration_minutes"],
                 priority=Priority[t["priority"]],
                 category=TaskCategory(t["category"]),
+                preferred_time=time(int(pt[:2]), int(pt[3:])) if pt else None,
                 is_completed=t.get("is_completed", False),
             )
             pet.add_task(task)
@@ -176,6 +187,7 @@ if st.button("Generate Schedule", type="primary"):
                     "title": st_item.task.title,
                     "pet_name": st_item.task.pet_name,
                     "reason": st_item.reason,
+                    "preferred_time": st_item.task.preferred_time.strftime("%H:%M") if st_item.task.preferred_time else None,
                 }
                 for st_item in plan.scheduled_tasks
             ],

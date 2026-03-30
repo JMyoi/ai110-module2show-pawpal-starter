@@ -284,6 +284,75 @@ def test_owner_no_filter_backward_compatible():
     assert len(owner.get_all_tasks()) == 2
 
 
+# ──────────────────────────────────────────────
+# Feature 1: Preferred Time
+# ──────────────────────────────────────────────
+
+def test_task_with_preferred_time_str():
+    task = Task("Morning Walk", 30, Priority.HIGH, preferred_time=time(9, 0))
+    assert "@ 09:00" in str(task)
+
+
+def test_task_without_preferred_time_str():
+    task = Task("Morning Walk", 30, Priority.HIGH)
+    assert "@" not in str(task)
+
+
+def test_sort_earlier_preferred_time_first(scheduler):
+    owner = Owner(name="Test", available_minutes=120)
+    pet = Pet(name="Rex", species="dog")
+    pet.add_task(Task("Late Walk", 20, Priority.HIGH, TaskCategory.WALK, preferred_time=time(10, 0)))
+    pet.add_task(Task("Early Walk", 20, Priority.HIGH, TaskCategory.WALK, preferred_time=time(9, 0)))
+    owner.add_pet(pet)
+
+    plan = scheduler.generate_plan(owner)
+    titles = [st.task.title for st in plan.scheduled_tasks]
+    assert titles.index("Early Walk") < titles.index("Late Walk")
+
+
+def test_task_without_preferred_time_sorts_after(scheduler):
+    owner = Owner(name="Test", available_minutes=120)
+    pet = Pet(name="Rex", species="dog")
+    pet.add_task(Task("Untimed Walk", 20, Priority.HIGH, TaskCategory.WALK))
+    pet.add_task(Task("Timed Walk", 20, Priority.HIGH, TaskCategory.WALK, preferred_time=time(9, 0)))
+    owner.add_pet(pet)
+
+    plan = scheduler.generate_plan(owner)
+    titles = [st.task.title for st in plan.scheduled_tasks]
+    assert titles.index("Timed Walk") < titles.index("Untimed Walk")
+
+
+def test_assign_time_uses_preferred_time(scheduler):
+    owner = Owner(name="Test", available_minutes=120, preferred_start_time=time(8, 0))
+    pet = Pet(name="Rex", species="dog")
+    pet.add_task(Task("Late Feed", 10, Priority.HIGH, preferred_time=time(10, 0)))
+    owner.add_pet(pet)
+
+    plan = scheduler.generate_plan(owner)
+    assert plan.scheduled_tasks[0].start_time == time(10, 0)
+
+
+def test_preferred_time_in_past_falls_back(scheduler):
+    owner = Owner(name="Test", available_minutes=120, preferred_start_time=time(11, 0))
+    pet = Pet(name="Rex", species="dog")
+    # preferred_time 9:00 is before start_time 11:00 — should fall back
+    pet.add_task(Task("Early Walk", 20, Priority.HIGH, preferred_time=time(9, 0)))
+    owner.add_pet(pet)
+
+    plan = scheduler.generate_plan(owner)
+    assert plan.scheduled_tasks[0].start_time == time(11, 0)
+
+
+def test_preferred_time_in_reason(scheduler):
+    owner = Owner(name="Test", available_minutes=120, preferred_start_time=time(8, 0))
+    pet = Pet(name="Rex", species="dog")
+    pet.add_task(Task("Walk", 20, Priority.HIGH, preferred_time=time(9, 0)))
+    owner.add_pet(pet)
+
+    plan = scheduler.generate_plan(owner)
+    assert "09:00" in plan.scheduled_tasks[0].reason
+
+
 def test_completed_tasks_not_scheduled(scheduler):
     owner = Owner(name="Test", available_minutes=120)
     pet = Pet(name="Rex", species="dog")

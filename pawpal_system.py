@@ -54,14 +54,16 @@ class Task:
     priority: Priority
     category: TaskCategory = TaskCategory.OTHER
     pet_name: str = ""
+    preferred_time: time | None = None
     is_completed: bool = False
 
     def mark_complete(self) -> None:
         self.is_completed = True
 
     def __str__(self) -> str:
+        time_str = f" @ {self.preferred_time.strftime('%H:%M')}" if self.preferred_time else ""
         status = " [DONE]" if self.is_completed else ""
-        return f"{self.title} ({self.duration_minutes} min, {self.priority.name}){status}"
+        return f"{self.title} ({self.duration_minutes} min, {self.priority.name}){time_str}{status}"
 
 
 @dataclass
@@ -222,9 +224,10 @@ class Scheduler:
         return sorted(
             tasks,
             key=lambda t: (
-                -t.priority.value,              # HIGH (3) first
-                CATEGORY_ORDER.get(t.category, 6),  # MEDICATION before WALK, etc.
-                t.duration_minutes,              # shorter tasks first among equals
+                -t.priority.value,                                          # HIGH (3) first
+                CATEGORY_ORDER.get(t.category, 6),                         # MEDICATION before WALK, etc.
+                (0, t.preferred_time) if t.preferred_time else (1, time(0, 0)),  # timed tasks before untimed
+                t.duration_minutes,                                         # shorter tasks first among equals
             ),
         )
 
@@ -232,17 +235,22 @@ class Scheduler:
         return task.duration_minutes <= remaining_minutes
 
     def _assign_time(self, task: Task, current_time: time, position: int, remaining_minutes: int) -> ScheduledTask:
-        start_dt = datetime.combine(date.today(), current_time)
+        # Honor preferred_time if set and still in the future relative to current_time
+        if task.preferred_time and task.preferred_time >= current_time:
+            start_time = task.preferred_time
+        else:
+            start_time = current_time
+        start_dt = datetime.combine(date.today(), start_time)
         end_dt = start_dt + timedelta(minutes=task.duration_minutes)
-        reason = self._build_reason(task, position, remaining_minutes)
+        reason = self._build_reason(task, position, remaining_minutes, used_preferred=start_time == task.preferred_time)
         return ScheduledTask(
             task=task,
-            start_time=current_time,
+            start_time=start_time,
             end_time=end_dt.time(),
             reason=reason,
         )
 
-    def _build_reason(self, task: Task, position: int, remaining_minutes: int) -> str:
+    def _build_reason(self, task: Task, position: int, remaining_minutes: int, used_preferred: bool = False) -> str:
         parts = []
         if task.priority == Priority.HIGH:
             parts.append("High priority — scheduled first")
@@ -253,6 +261,11 @@ class Scheduler:
 
         if task.category != TaskCategory.OTHER:
             parts.append(f"{task.category.value} task")
+
+        if used_preferred and task.preferred_time:
+            parts.append(f"Preferred time: {task.preferred_time.strftime('%H:%M')}")
+        elif task.preferred_time:
+            parts.append(f"Preferred time {task.preferred_time.strftime('%H:%M')} passed — scheduled next")
 
         if position == 0:
             parts.append("first in schedule")
