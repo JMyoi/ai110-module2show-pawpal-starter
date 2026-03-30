@@ -11,11 +11,17 @@ Three core actions a user can perform
 
 - Briefly describe your initial UML design.
 - What classes did you include, and what responsibilities did you assign to each?
+Classes I included are 
+-Owner,A pet owner with time constraints and preferences
+-Pet, A pet with its associated care tasks
+-Task, A pet care task request (input to the scheduler)
+-Scheduler, scheduler that produces a DailyPlan from an Owner's and pet's data
 
 **b. Design changes**
 
 - Did your design change during implementation?
 - If yes, describe at least one change and why you made it.
+added 2 enumeration classes, Priority[low, medium, high], and Task category, to organize the data better in the classes that need these Enum. 
 
 ---
 
