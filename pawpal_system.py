@@ -56,6 +56,7 @@ class Task:
     pet_name: str = ""
     preferred_time: time | None = None
     is_completed: bool = False
+    recurrence: str | None = None  # None, "daily", or "weekly"
 
     def mark_complete(self) -> None:
         self.is_completed = True
@@ -93,6 +94,28 @@ class Pet:
 
     def get_tasks_by_status(self, completed: bool) -> list[Task]:
         return [t for t in self.tasks if t.is_completed == completed]
+
+    def complete_task(self, task_title: str) -> "Task | None":
+        """Mark a task complete. If it recurs, create and append the next occurrence.
+        Returns the new Task if one was created, otherwise None."""
+        for task in self.tasks:
+            if task.title == task_title and not task.is_completed:
+                task.mark_complete()
+                if task.recurrence in ("daily", "weekly"):
+                    new_task = Task(
+                        title=task.title,
+                        duration_minutes=task.duration_minutes,
+                        priority=task.priority,
+                        category=task.category,
+                        preferred_time=task.preferred_time,
+                        is_completed=False,
+                        recurrence=task.recurrence,
+                    )
+                    self.tasks.append(new_task)
+                    new_task.pet_name = self.name
+                    return new_task
+                return None
+        return None
 
 
 @dataclass
@@ -150,6 +173,7 @@ class DailyPlan:
     skipped_tasks: list[tuple[Task, str]] = field(default_factory=list)
     total_scheduled_minutes: int = 0
     total_available_minutes: int = 0
+    warnings: list[str] = field(default_factory=list)
 
     def get_summary(self) -> str:
         lines = [
@@ -171,6 +195,13 @@ class DailyPlan:
             lines.append("─" * 50)
             for task, reason in self.skipped_tasks:
                 lines.append(f"  ✗ {task} — {reason}")
+
+        if self.warnings:
+            lines.append("")
+            lines.append("Warnings:")
+            lines.append("─" * 50)
+            for warning in self.warnings:
+                lines.append(f"  ⚠ {warning}")
 
         return "\n".join(lines)
 
@@ -198,7 +229,7 @@ class Scheduler:
 
         for position, task in enumerate(sorted_tasks):
             if self._fits_in_budget(task, remaining_minutes):
-                st = self._assign_time(task, current_time, position, remaining_minutes)
+                st = self._assign_time(task, current_time, position, remaining_minutes, owner.preferred_start_time)
                 scheduled.append(st)
                 remaining_minutes -= task.duration_minutes
                 current_time = st.end_time
@@ -211,7 +242,7 @@ class Scheduler:
 
         total_scheduled = sum(st.task.duration_minutes for st in scheduled)
 
-        return DailyPlan(
+        plan = DailyPlan(
             owner_name=owner.name,
             date=date.today(),
             scheduled_tasks=scheduled,
@@ -219,6 +250,8 @@ class Scheduler:
             total_scheduled_minutes=total_scheduled,
             total_available_minutes=owner.available_minutes,
         )
+        plan.warnings = self.detect_conflicts(plan)
+        return plan
 
     def _sort_tasks(self, tasks: list[Task]) -> list[Task]:
         return sorted(
@@ -234,9 +267,13 @@ class Scheduler:
     def _fits_in_budget(self, task: Task, remaining_minutes: int) -> bool:
         return task.duration_minutes <= remaining_minutes
 
-    def _assign_time(self, task: Task, current_time: time, position: int, remaining_minutes: int) -> ScheduledTask:
-        # Honor preferred_time if set and still in the future relative to current_time
-        if task.preferred_time and task.preferred_time >= current_time:
+    def _assign_time(self, task: Task, current_time: time, position: int, remaining_minutes: int, owner_start_time: time | None = None) -> ScheduledTask:
+        # Honor preferred_time if it's not before the owner's day start.
+        # This allows two tasks at the same preferred_time to both be scheduled there
+        # (creating a detectable overlap) rather than silently bumping the second one.
+        # Only fall back to current_time if preferred_time is before the owner's day start.
+        day_start = owner_start_time or time(0, 0)
+        if task.preferred_time and task.preferred_time >= day_start:
             start_time = task.preferred_time
         else:
             start_time = current_time
@@ -249,6 +286,20 @@ class Scheduler:
             end_time=end_dt.time(),
             reason=reason,
         )
+
+    def detect_conflicts(self, plan: "DailyPlan") -> list[str]:
+        """O(n²) pairwise overlap check across all scheduled tasks. Returns warning strings."""
+        warnings = []
+        tasks = plan.scheduled_tasks
+        for i in range(len(tasks)):
+            for j in range(i + 1, len(tasks)):
+                a, b = tasks[i], tasks[j]
+                if a.end_time > b.start_time and b.end_time > a.start_time:
+                    warnings.append(
+                        f"Conflict: '{a.task.title}' ({a.start_time.strftime('%H:%M')}–{a.end_time.strftime('%H:%M')}) "
+                        f"overlaps '{b.task.title}' ({b.start_time.strftime('%H:%M')}–{b.end_time.strftime('%H:%M')})"
+                    )
+        return warnings
 
     def _build_reason(self, task: Task, position: int, remaining_minutes: int, used_preferred: bool = False) -> str:
         parts = []

@@ -365,3 +365,165 @@ def test_completed_tasks_not_scheduled(scheduler):
     scheduled_titles = [st.task.title for st in plan.scheduled_tasks]
     assert "Walk" not in scheduled_titles
     assert "Feed" in scheduled_titles
+
+
+# ──────────────────────────────────────────────
+# Feature 3: Recurring Tasks
+# ──────────────────────────────────────────────
+
+def test_task_default_no_recurrence():
+    task = Task("Walk", 20, Priority.HIGH)
+    assert task.recurrence is None
+
+
+def test_complete_non_recurring():
+    pet = Pet(name="Rex", species="dog")
+    pet.add_task(Task("Walk", 20, Priority.HIGH))
+    result = pet.complete_task("Walk")
+    assert result is None
+    assert pet.tasks[0].is_completed is True
+
+
+def test_complete_daily_creates_new():
+    pet = Pet(name="Rex", species="dog")
+    pet.add_task(Task("Walk", 20, Priority.HIGH, recurrence="daily"))
+    new_task = pet.complete_task("Walk")
+    assert new_task is not None
+    assert len(pet.tasks) == 2
+    assert pet.tasks[0].is_completed is True
+    assert new_task.is_completed is False
+    assert new_task.recurrence == "daily"
+
+
+def test_complete_weekly_creates_new():
+    pet = Pet(name="Rex", species="dog")
+    pet.add_task(Task("Grooming", 30, Priority.LOW, TaskCategory.GROOMING, recurrence="weekly"))
+    new_task = pet.complete_task("Grooming")
+    assert new_task is not None
+    assert new_task.recurrence == "weekly"
+    assert new_task.is_completed is False
+
+
+def test_new_recurring_task_is_independent():
+    pet = Pet(name="Rex", species="dog")
+    pet.add_task(Task("Walk", 20, Priority.HIGH, recurrence="daily"))
+    new_task = pet.complete_task("Walk")
+    # Old and new are separate objects
+    assert pet.tasks[0] is not new_task
+    assert pet.tasks[0].is_completed is True
+    assert new_task.is_completed is False
+
+
+def test_complete_task_not_found():
+    pet = Pet(name="Rex", species="dog")
+    pet.add_task(Task("Walk", 20, Priority.HIGH))
+    result = pet.complete_task("Nonexistent Task")
+    assert result is None
+    assert pet.tasks[0].is_completed is False
+
+
+def test_completed_recurring_not_rescheduled(scheduler):
+    owner = Owner(name="Test", available_minutes=120)
+    pet = Pet(name="Rex", species="dog")
+    pet.add_task(Task("Walk", 20, Priority.HIGH, recurrence="daily"))
+    owner.add_pet(pet)
+    # Complete the original — creates a new recurring copy
+    pet.complete_task("Walk")
+    assert len(pet.tasks) == 2
+
+    plan = scheduler.generate_plan(owner)
+    scheduled_titles = [st.task.title for st in plan.scheduled_tasks]
+    # Exactly one Walk in the schedule (the new copy, not the completed original)
+    assert scheduled_titles.count("Walk") == 1
+
+
+# ──────────────────────────────────────────────
+# Feature 4: Conflict Detection
+# ──────────────────────────────────────────────
+
+def test_no_conflicts_sequential(scheduler):
+    """Normal plan with no preferred times produces no warnings."""
+    owner = Owner(name="Test", available_minutes=120, preferred_start_time=time(8, 0))
+    pet = Pet(name="Rex", species="dog")
+    pet.add_task(Task("Walk", 20, Priority.HIGH, TaskCategory.WALK))
+    pet.add_task(Task("Feed", 10, Priority.MEDIUM, TaskCategory.FEEDING))
+    owner.add_pet(pet)
+
+    plan = scheduler.generate_plan(owner)
+    assert plan.warnings == []
+
+
+def test_conflict_detected_same_preferred_time(scheduler):
+    """Two tasks with the same preferred time produce a conflict warning."""
+    owner = Owner(name="Test", available_minutes=120, preferred_start_time=time(8, 0))
+    pet = Pet(name="Rex", species="dog")
+    pet.add_task(Task("Walk", 30, Priority.HIGH, TaskCategory.WALK, preferred_time=time(9, 0)))
+    pet.add_task(Task("Meds", 30, Priority.HIGH, TaskCategory.MEDICATION, preferred_time=time(9, 0)))
+    owner.add_pet(pet)
+
+    plan = scheduler.generate_plan(owner)
+    assert len(plan.warnings) >= 1
+
+
+def test_conflict_message_has_task_names(scheduler):
+    """Conflict warning contains both task titles."""
+    owner = Owner(name="Test", available_minutes=120, preferred_start_time=time(8, 0))
+    pet = Pet(name="Rex", species="dog")
+    pet.add_task(Task("Walk", 30, Priority.HIGH, TaskCategory.WALK, preferred_time=time(9, 0)))
+    pet.add_task(Task("Meds", 30, Priority.HIGH, TaskCategory.MEDICATION, preferred_time=time(9, 0)))
+    owner.add_pet(pet)
+
+    plan = scheduler.generate_plan(owner)
+    assert any("Walk" in w and "Meds" in w for w in plan.warnings)
+
+
+def test_conflict_message_has_times(scheduler):
+    """Conflict warning contains the time ranges of the conflicting tasks."""
+    owner = Owner(name="Test", available_minutes=120, preferred_start_time=time(8, 0))
+    pet = Pet(name="Rex", species="dog")
+    pet.add_task(Task("Walk", 30, Priority.HIGH, TaskCategory.WALK, preferred_time=time(9, 0)))
+    pet.add_task(Task("Meds", 30, Priority.HIGH, TaskCategory.MEDICATION, preferred_time=time(9, 0)))
+    owner.add_pet(pet)
+
+    plan = scheduler.generate_plan(owner)
+    assert any("09:00" in w for w in plan.warnings)
+
+
+def test_multiple_conflicts_all_reported(scheduler):
+    """Three tasks at the same slot produce 3 pairwise warnings."""
+    owner = Owner(name="Test", available_minutes=240, preferred_start_time=time(8, 0))
+    pet = Pet(name="Rex", species="dog")
+    pet.add_task(Task("Walk", 30, Priority.HIGH, TaskCategory.WALK, preferred_time=time(9, 0)))
+    pet.add_task(Task("Meds", 30, Priority.HIGH, TaskCategory.MEDICATION, preferred_time=time(9, 0)))
+    pet.add_task(Task("Feed", 30, Priority.HIGH, TaskCategory.FEEDING, preferred_time=time(9, 0)))
+    owner.add_pet(pet)
+
+    plan = scheduler.generate_plan(owner)
+    assert len(plan.warnings) == 3
+
+
+def test_no_crash_on_conflict(scheduler):
+    """Plan is still generated and tasks still scheduled even with conflicts."""
+    owner = Owner(name="Test", available_minutes=120, preferred_start_time=time(8, 0))
+    pet = Pet(name="Rex", species="dog")
+    pet.add_task(Task("Walk", 30, Priority.HIGH, TaskCategory.WALK, preferred_time=time(9, 0)))
+    pet.add_task(Task("Meds", 30, Priority.HIGH, TaskCategory.MEDICATION, preferred_time=time(9, 0)))
+    owner.add_pet(pet)
+
+    plan = scheduler.generate_plan(owner)
+    assert len(plan.scheduled_tasks) == 2
+    assert plan.warnings  # warnings exist but no crash
+
+
+def test_adjacent_tasks_no_conflict(scheduler):
+    """A task ending at 9:30 and one starting at 9:30 do NOT overlap."""
+    owner = Owner(name="Test", available_minutes=120, preferred_start_time=time(9, 0))
+    pet = Pet(name="Rex", species="dog")
+    # First task: 9:00–9:30 (sequential, no preferred time)
+    # Second task: preferred 9:30 (starts exactly when first ends)
+    pet.add_task(Task("Walk", 30, Priority.HIGH, TaskCategory.WALK))
+    pet.add_task(Task("Feed", 15, Priority.HIGH, TaskCategory.FEEDING, preferred_time=time(9, 30)))
+    owner.add_pet(pet)
+
+    plan = scheduler.generate_plan(owner)
+    assert plan.warnings == []

@@ -80,11 +80,13 @@ else:
         priority = st.selectbox("Priority", ["HIGH", "MEDIUM", "LOW"])
     category = st.selectbox("Category", [c.value for c in TaskCategory])
 
-    col_time1, col_time2 = st.columns([1, 2])
+    col_time1, col_time2, col_recur = st.columns([1, 2, 1])
     with col_time1:
         use_preferred_time = st.checkbox("Set preferred time?")
     with col_time2:
         preferred_time_val = st.time_input("Preferred time", value=time(9, 0), disabled=not use_preferred_time)
+    with col_recur:
+        recurrence = st.selectbox("Recurrence", ["None", "Daily", "Weekly"])
 
     if st.button("Add Task"):
         if task_title:
@@ -94,6 +96,7 @@ else:
                 "priority": priority,
                 "category": category,
                 "preferred_time": preferred_time_val.strftime("%H:%M") if use_preferred_time else None,
+                "recurrence": None if recurrence == "None" else recurrence.lower(),
             }
             st.session_state.pets[task_pet]["tasks"].append(task_data)
             st.rerun()
@@ -132,6 +135,7 @@ else:
                     "priority": t["priority"],
                     "category": t["category"],
                     "preferred time": t.get("preferred_time") or "—",
+                    "recurrence": t.get("recurrence") or "—",
                     "status": "Done" if t.get("is_completed") else "Pending",
                 }
                 for t in filtered
@@ -165,6 +169,7 @@ if st.button("Generate Schedule", type="primary"):
                 category=TaskCategory(t["category"]),
                 preferred_time=time(int(pt[:2]), int(pt[3:])) if pt else None,
                 is_completed=t.get("is_completed", False),
+                recurrence=t.get("recurrence"),
             )
             pet.add_task(task)
         owner.add_pet(pet)
@@ -180,6 +185,7 @@ if st.button("Generate Schedule", type="primary"):
             "utilization": plan.get_utilization(),
             "total_scheduled": plan.total_scheduled_minutes,
             "total_available": plan.total_available_minutes,
+            "warnings": plan.warnings,
             "scheduled": [
                 {
                     "start": st_item.start_time.strftime("%H:%M"),
@@ -188,6 +194,7 @@ if st.button("Generate Schedule", type="primary"):
                     "pet_name": st_item.task.pet_name,
                     "reason": st_item.reason,
                     "preferred_time": st_item.task.preferred_time.strftime("%H:%M") if st_item.task.preferred_time else None,
+                    "recurrence": st_item.task.recurrence,
                 }
                 for st_item in plan.scheduled_tasks
             ],
@@ -231,10 +238,22 @@ if st.session_state.last_plan:
                     for t in pet_tasks:
                         if t["title"] == item["title"] and not t.get("is_completed"):
                             t["is_completed"] = True
-                            st.toast(f"'{item['title']}' marked complete!")
+                            # If recurring, create the next occurrence in session state
+                            if t.get("recurrence") in ("daily", "weekly"):
+                                next_task = {k: v for k, v in t.items()}
+                                next_task["is_completed"] = False
+                                pet_tasks.append(next_task)
+                                st.toast(f"'{item['title']}' done! Next {t['recurrence']} occurrence added.")
+                            else:
+                                st.toast(f"'{item['title']}' marked complete!")
                             st.rerun()
 
     if plan_data["skipped"]:
         st.markdown("### Skipped Tasks")
         for item in plan_data["skipped"]:
             st.markdown(f"- ~~{item['title']}~~ ({item['pet_name']}) — {item['reason']}")
+
+    if plan_data.get("warnings"):
+        st.markdown("### Warnings")
+        for w in plan_data["warnings"]:
+            st.warning(w)
