@@ -83,7 +83,7 @@ Fairly confident for normal use cases. The test suite covers all four smart feat
 **a. What went well**
 
 - What part of this project are you most satisfied with?
-I am satisfied with the schedular logic and implementation, It is robust and implemented via a Greedy priority-first bin-packing
+I am satisfied with the schedular logic and implementation, It is robust and implemented via a Greedy priority-first bin-packing.
 
 **b. What you would improve**
 
@@ -93,3 +93,6 @@ I would make the UI prettier, right now it is pretty simple but works.
 **c. Key takeaway**
 
 - What is one important thing you learned about designing systems or working with AI on this project?
+I learned that planning initially and before implementing any feature is vastly important and it will save you from having bugs or misalignment with your actuall intent and what the Model assumed. You can catch all this during planning and fill in the gaps of specificaitons before anything is actually implemented.
+
+

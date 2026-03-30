@@ -1,6 +1,14 @@
 # PawPal+ (Module 2 Project)
 
-You are building **PawPal+**, a Streamlit app that helps a pet owner plan care tasks for their pet.
+A Streamlit app that helps pet owners plan and prioritize daily care tasks for their pets.
+
+## Demo
+
+![alt text](demoimg1.png)
+![alt text](tasksimg.png)
+![alt text](FilterTaskimg.png)
+![alt text](generateScheduleimg.png)
+---
 
 ## Scenario
 
@@ -45,6 +53,8 @@ pip install -r requirements.txt
 ---
 
 ## System Object Design
+
+![alt text](image.png)
 
 All classes are defined in `pawpal_system.py`. The system separates **input data** (Owner, Pet, Task) from **output data** (ScheduledTask, DailyPlan), with the **Scheduler** as the bridge between them.
 
@@ -238,3 +248,16 @@ Owner  ──has-many──▶  Pet  ──has-many──▶  Task
 - **Scheduler → Owner**: Dependency (receives as input)
 - **Scheduler → DailyPlan**: Dependency (produces as output)
 - **DailyPlan → ScheduledTask**: Composition (plan owns its schedule entries)
+
+## Features
+
+- **Greedy priority-first scheduling** — HIGH priority tasks are always scheduled before MEDIUM or LOW, regardless of duration
+- **Category-based tiebreaking** — among tasks of equal priority, medication is scheduled before feeding, before walks, etc.
+- **Preferred time sorting** — tasks with a requested start time are sorted earlier and honored when the time hasn't passed
+- **Conflict warnings** — if two tasks overlap (both assigned the same preferred time), the app reports a warning instead of silently dropping one
+- **Completion tracking** — mark tasks done directly from the schedule; completed tasks are excluded from future plans
+- **Daily/weekly recurrence** — completing a recurring task automatically creates the next occurrence
+- **Filter view** — filter the task list by pet or by completion status
+- **Skipped task transparency** — tasks that don't fit the time budget are listed with an explanation of why they were dropped
+
+---
