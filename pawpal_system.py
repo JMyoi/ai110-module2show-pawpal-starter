@@ -54,9 +54,14 @@ class Task:
     priority: Priority
     category: TaskCategory = TaskCategory.OTHER
     pet_name: str = ""
+    is_completed: bool = False
+
+    def mark_complete(self) -> None:
+        self.is_completed = True
 
     def __str__(self) -> str:
-        return f"{self.title} ({self.duration_minutes} min, {self.priority.name})"
+        status = " [DONE]" if self.is_completed else ""
+        return f"{self.title} ({self.duration_minutes} min, {self.priority.name}){status}"
 
 
 @dataclass
@@ -84,6 +89,9 @@ class Pet:
     def get_tasks_by_category(self, category: TaskCategory) -> list[Task]:
         return [t for t in self.tasks if t.category == category]
 
+    def get_tasks_by_status(self, completed: bool) -> list[Task]:
+        return [t for t in self.tasks if t.is_completed == completed]
+
 
 @dataclass
 class Owner:
@@ -103,8 +111,13 @@ class Owner:
                 return True
         return False
 
-    def get_all_tasks(self) -> list[Task]:
-        return [task for pet in self.pets for task in pet.tasks]
+    def get_all_tasks(self, pet_name: str | None = None, completed: bool | None = None) -> list[Task]:
+        tasks = [task for pet in self.pets for task in pet.tasks]
+        if pet_name is not None:
+            tasks = [t for t in tasks if t.pet_name == pet_name]
+        if completed is not None:
+            tasks = [t for t in tasks if t.is_completed == completed]
+        return tasks
 
 
 # ──────────────────────────────────────────────
@@ -173,7 +186,7 @@ class Scheduler:
     """Stateless scheduler that produces a DailyPlan from an Owner's data."""
 
     def generate_plan(self, owner: Owner) -> DailyPlan:
-        all_tasks = owner.get_all_tasks()
+        all_tasks = [t for t in owner.get_all_tasks() if not t.is_completed]
         sorted_tasks = self._sort_tasks(all_tasks)
 
         scheduled = []

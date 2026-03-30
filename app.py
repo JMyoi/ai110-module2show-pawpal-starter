@@ -16,6 +16,8 @@ st.caption("Smart pet care scheduling — prioritize what matters most.")
 
 if "pets" not in st.session_state:
     st.session_state.pets = {}  # {pet_name: {"species": ..., "age": ..., "tasks": [...]}}
+if "last_plan" not in st.session_state:
+    st.session_state.last_plan = None  # stores the most recently generated plan
 
 # ──────────────────────────────────────────────
 # Owner info
@@ -88,11 +90,44 @@ else:
             })
             st.rerun()
 
-    # Show tasks per pet
+    # Filter controls
+    st.markdown("#### Filter Tasks")
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        filter_pet = st.selectbox(
+            "Filter by pet",
+            ["All pets"] + list(st.session_state.pets.keys()),
+            key="filter_pet",
+        )
+    with col_f2:
+        filter_status = st.selectbox(
+            "Filter by status",
+            ["All", "Pending", "Completed"],
+            key="filter_status",
+        )
+
+    # Show tasks per pet (with filters applied)
     for pname, pdata in st.session_state.pets.items():
-        if pdata["tasks"]:
+        if filter_pet != "All pets" and pname != filter_pet:
+            continue
+        filtered = pdata["tasks"]
+        if filter_status == "Pending":
+            filtered = [t for t in filtered if not t.get("is_completed", False)]
+        elif filter_status == "Completed":
+            filtered = [t for t in filtered if t.get("is_completed", False)]
+        if filtered:
             st.markdown(f"**{pname}'s tasks:**")
-            st.table(pdata["tasks"])
+            display = [
+                {
+                    "title": t["title"],
+                    "duration (min)": t["duration_minutes"],
+                    "priority": t["priority"],
+                    "category": t["category"],
+                    "status": "Done" if t.get("is_completed") else "Pending",
+                }
+                for t in filtered
+            ]
+            st.table(display)
 
 st.divider()
 
@@ -118,29 +153,76 @@ if st.button("Generate Schedule", type="primary"):
                 duration_minutes=t["duration_minutes"],
                 priority=Priority[t["priority"]],
                 category=TaskCategory(t["category"]),
+                is_completed=t.get("is_completed", False),
             )
             pet.add_task(task)
         owner.add_pet(pet)
 
     if not owner.get_all_tasks():
         st.warning("Add at least one task before generating a schedule.")
+        st.session_state.last_plan = None
     else:
         scheduler = Scheduler()
         plan = scheduler.generate_plan(owner)
+        # Persist plan data in session state so it survives reruns (e.g. when Done is clicked)
+        st.session_state.last_plan = {
+            "utilization": plan.get_utilization(),
+            "total_scheduled": plan.total_scheduled_minutes,
+            "total_available": plan.total_available_minutes,
+            "scheduled": [
+                {
+                    "start": st_item.start_time.strftime("%H:%M"),
+                    "end": st_item.end_time.strftime("%H:%M"),
+                    "title": st_item.task.title,
+                    "pet_name": st_item.task.pet_name,
+                    "reason": st_item.reason,
+                }
+                for st_item in plan.scheduled_tasks
+            ],
+            "skipped": [
+                {"title": task.title, "pet_name": task.pet_name, "reason": reason}
+                for task, reason in plan.skipped_tasks
+            ],
+        }
 
-        # Display scheduled tasks
-        st.markdown(f"**Time utilization:** {plan.get_utilization():.0f}% "
-                    f"({plan.total_scheduled_minutes}/{plan.total_available_minutes} min)")
+# Display the last generated plan (persists across reruns from Done buttons)
+if st.session_state.last_plan:
+    plan_data = st.session_state.last_plan
 
-        st.markdown("### Scheduled Tasks")
-        for st_item in plan.scheduled_tasks:
+    st.markdown(
+        f"**Time utilization:** {plan_data['utilization']:.0f}% "
+        f"({plan_data['total_scheduled']}/{plan_data['total_available']} min)"
+    )
+
+    st.markdown("### Scheduled Tasks")
+    for item in plan_data["scheduled"]:
+        is_done = st.session_state.pets.get(item["pet_name"], {})
+        task_done = any(
+            t["title"] == item["title"] and t.get("is_completed")
+            for t in st.session_state.pets.get(item["pet_name"], {}).get("tasks", [])
+        )
+        col_task, col_btn = st.columns([5, 1])
+        with col_task:
+            label = f"~~{item['title']}~~" if task_done else item["title"]
             st.markdown(
-                f"**{st_item.start_time.strftime('%H:%M')}–{st_item.end_time.strftime('%H:%M')}** "
-                f"| {st_item.task.title} ({st_item.task.pet_name}) "
-                f"| *{st_item.reason}*"
+                f"**{item['start']}–{item['end']}** "
+                f"| {label} ({item['pet_name']}) "
+                f"| *{item['reason']}*"
             )
+        with col_btn:
+            if task_done:
+                st.markdown("✅")
+            else:
+                btn_key = f"complete_{item['pet_name']}_{item['title']}"
+                if st.button("Done", key=btn_key):
+                    pet_tasks = st.session_state.pets[item["pet_name"]]["tasks"]
+                    for t in pet_tasks:
+                        if t["title"] == item["title"] and not t.get("is_completed"):
+                            t["is_completed"] = True
+                            st.toast(f"'{item['title']}' marked complete!")
+                            st.rerun()
 
-        if plan.skipped_tasks:
-            st.markdown("### Skipped Tasks")
-            for task, reason in plan.skipped_tasks:
-                st.markdown(f"- ~~{task.title}~~ — {reason}")
+    if plan_data["skipped"]:
+        st.markdown("### Skipped Tasks")
+        for item in plan_data["skipped"]:
+            st.markdown(f"- ~~{item['title']}~~ ({item['pet_name']}) — {item['reason']}")

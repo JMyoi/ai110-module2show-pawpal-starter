@@ -215,3 +215,84 @@ def test_owner_remove_pet():
     assert owner.remove_pet("Luna") is True
     assert owner.remove_pet("Luna") is False
     assert len(owner.pets) == 0
+
+
+# ──────────────────────────────────────────────
+# Feature 2: Filtering by Pet & Completion Status
+# ──────────────────────────────────────────────
+
+def test_task_default_not_completed():
+    task = Task("Walk", 20, Priority.HIGH)
+    assert task.is_completed is False
+
+
+def test_mark_complete():
+    task = Task("Walk", 20, Priority.HIGH)
+    task.mark_complete()
+    assert task.is_completed is True
+
+
+def test_pet_get_tasks_by_status():
+    pet = Pet(name="Luna", species="dog")
+    pet.add_task(Task("Walk", 20, Priority.HIGH))
+    pet.add_task(Task("Feed", 10, Priority.MEDIUM))
+    pet.add_task(Task("Groom", 15, Priority.LOW))
+    pet.tasks[0].mark_complete()
+
+    assert len(pet.get_tasks_by_status(completed=True)) == 1
+    assert len(pet.get_tasks_by_status(completed=False)) == 2
+    assert pet.get_tasks_by_status(completed=True)[0].title == "Walk"
+
+
+def test_owner_filter_by_pet():
+    owner = Owner(name="Test")
+    dog = Pet(name="Mochi", species="dog")
+    dog.add_task(Task("Walk", 20, Priority.HIGH))
+    cat = Pet(name="Milo", species="cat")
+    cat.add_task(Task("Feed Milo", 10, Priority.MEDIUM))
+    owner.add_pet(dog)
+    owner.add_pet(cat)
+
+    mochi_tasks = owner.get_all_tasks(pet_name="Mochi")
+    assert len(mochi_tasks) == 1
+    assert mochi_tasks[0].title == "Walk"
+
+    milo_tasks = owner.get_all_tasks(pet_name="Milo")
+    assert len(milo_tasks) == 1
+    assert milo_tasks[0].title == "Feed Milo"
+
+
+def test_owner_filter_by_completed():
+    owner = Owner(name="Test")
+    pet = Pet(name="Rex", species="dog")
+    pet.add_task(Task("Walk", 20, Priority.HIGH))
+    pet.add_task(Task("Feed", 10, Priority.MEDIUM))
+    owner.add_pet(pet)
+    owner.get_all_tasks()[0].mark_complete()
+
+    assert len(owner.get_all_tasks(completed=True)) == 1
+    assert len(owner.get_all_tasks(completed=False)) == 1
+
+
+def test_owner_no_filter_backward_compatible():
+    owner = Owner(name="Test")
+    pet = Pet(name="Rex", species="dog")
+    pet.add_task(Task("Walk", 20, Priority.HIGH))
+    pet.add_task(Task("Feed", 10, Priority.MEDIUM))
+    owner.add_pet(pet)
+
+    assert len(owner.get_all_tasks()) == 2
+
+
+def test_completed_tasks_not_scheduled(scheduler):
+    owner = Owner(name="Test", available_minutes=120)
+    pet = Pet(name="Rex", species="dog")
+    pet.add_task(Task("Walk", 20, Priority.HIGH))
+    pet.add_task(Task("Feed", 10, Priority.MEDIUM))
+    owner.add_pet(pet)
+    pet.tasks[0].mark_complete()
+
+    plan = scheduler.generate_plan(owner)
+    scheduled_titles = [st.task.title for st in plan.scheduled_tasks]
+    assert "Walk" not in scheduled_titles
+    assert "Feed" in scheduled_titles
